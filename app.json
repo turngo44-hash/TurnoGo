@@ -7,6 +7,16 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Permitir que TurnoGo acceda a tus fotos.",
+          "savePhotosPermission": "Permitir que TurnoGo guarde fotos.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",

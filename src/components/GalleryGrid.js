@@ -20,7 +20,7 @@ const GRID_ITEM_WIDTH = Math.floor(width / 3);
 // Make items slightly taller than wide (Instagram portrait ~4:5 -> height = width * 1.25)
 const GRID_ITEM_HEIGHT = Math.round(GRID_ITEM_WIDTH * 1.25);
 
-const GalleryGrid = ({ photos, onPhotoPress, handleAddPhoto }) => {
+const GalleryGrid = ({ photos, onPhotoPress, handleAddPhoto, professional }) => {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
@@ -102,7 +102,7 @@ const GalleryGrid = ({ photos, onPhotoPress, handleAddPhoto }) => {
         {getFooter()}
       </View>
       {/* Using the simple photo viewer component to avoid architecture issues */}
-      <SimplePhotoViewer photos={items} initialIndex={viewerIndex} visible={viewerVisible} onClose={closeViewer} />
+  <SimplePhotoViewer photos={items} initialIndex={viewerIndex} visible={viewerVisible} onClose={closeViewer} professional={professional} />
     </View>
   );
 };

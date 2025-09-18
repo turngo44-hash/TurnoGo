@@ -9,17 +9,24 @@ import {
   Dimensions,
   TouchableOpacity,
   Text,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 // Importar componentes
 import ProfileHeader from '../../components/ProfileHeader';
 import BookyStyleTabs from '../../components/BookyStyleTabs';
 import GalleryTab from '../../components/GalleryTab';
+import GalleryTabRedux from '../../components/GalleryTabRedux'; // Nueva versión con Redux
+import InfoTab from '../../components/InfoTab';
 import ServicesTab from '../../components/ServicesTab';
+import ServicesTabNew from '../../components/ServicesTabNew';
 import StoreTab from '../../components/StoreTab';
+import StoreTabNew from '../../components/StoreTabNew';
+import ImageUploaderReduxContainer from '../../components/ImageUploaderReduxContainer';
 
 // Datos de ejemplo
 import { professionalData } from '../../data/mockProfessionalData';
@@ -43,6 +50,7 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [addRequestCount, setAddRequestCount] = useState(0);
   const [extraBottomSpace, setExtraBottomSpace] = useState(0);
+  const [imageUploaderVisible, setImageUploaderVisible] = useState(false);
   
   // Datos del profesional (de props o mock)
   const professional = route?.params?.professional || professionalData;
@@ -64,6 +72,7 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
   // Lista de pestañas
   const tabs = [
     { id: 'gallery', title: 'Galería', icon: 'grid-outline' },
+    { id: 'info', title: 'Info', icon: 'information-circle-outline' },
     { id: 'services', title: 'Servicios', icon: 'cut-outline' },
     { id: 'store', title: 'Tienda', icon: 'cart-outline' },
   ];
@@ -116,13 +125,15 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'gallery':
-        return <GalleryTab photos={professional.photos} />;
+  return <GalleryTab photos={professional.photos} professional={professional} />;
+      case 'info':
+        return <InfoTab professional={professional} />;
       case 'services':
-        return <ServicesTab services={professional.services} />;
+        return <ServicesTabNew services={professional.services} />;
       case 'store':
-        return <StoreTab products={professional.products} />;
+        return <StoreTabNew products={professional.products} />;
       default:
-        return <GalleryTab photos={professional.photos} />;
+  return <GalleryTab photos={professional.photos} professional={professional} />;
     }
   };
 
@@ -142,7 +153,8 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
             style={[styles.headerAddButton, styles.headerIconOffset]}
             onPress={() => {
               setActiveTab('gallery');
-              setAddRequestCount(c => c + 1);
+              // Abrimos el selector de imágenes mejorado
+              setImageUploaderVisible(true);
               try { scrollRef.current && scrollRef.current.scrollTo({ y: 0, animated: true }); } catch (e) {}
             }}
           >
@@ -151,6 +163,7 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
 
             <TouchableOpacity
               style={[styles.headerButton, styles.headerIconInline, styles.headerIconLarge]}
+              onPress={() => navigation.navigate('ChatScreen', { professional: professional })}
             >
               <Ionicons name="chatbubble-outline" size={24} color="#000" />
             </TouchableOpacity>
@@ -222,7 +235,12 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
         <View style={styles.tabContent}>
           {/* Pass addRequestCount to gallery so header button can trigger add flow */}
           {activeTab === 'gallery' ? (
-            <GalleryTab photos={professional.photos} onPhotoPress={() => {}} onAddPhoto={() => alert('Agregar foto (desde header)')} addRequestCount={addRequestCount} />
+            <GalleryTabRedux 
+              photos={professional.photos} 
+              professional={professional} 
+              onAddPhoto={() => setImageUploaderVisible(true)}
+              addRequestCount={addRequestCount} 
+            />
           ) : (
             renderTabContent()
           )}
@@ -233,6 +251,20 @@ const ProfessionalProfileNew = ({ route, initialTab = 'gallery' }) => {
         <View style={{ height: 24 }} />
       </Animated.ScrollView>
       {/* tabs now use ScrollView.stickyHeaderIndices for native sticky behavior */}
+      
+      {/* Modal para subir imágenes con Redux */}
+      <ImageUploaderReduxContainer
+        visible={imageUploaderVisible}
+        onClose={() => setImageUploaderVisible(false)}
+        onSave={() => {
+          // Incrementamos el contador para que GalleryTab sepa que hay una nueva imagen
+          setAddRequestCount(c => c + 1);
+        }}
+        title="Añadir a tu galería"
+        aspectRatio={[4, 5]} // Relación de aspecto Instagram
+        purpose="gallery"
+        professionalId={professional?.id}
+      />
     </View>
   );
 };

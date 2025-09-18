@@ -5,13 +5,14 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import GalleryGrid from './GalleryGrid';
 
 const { width } = Dimensions.get('window');
 
-const GalleryTab = ({ photos = [], onPhotoPress }) => {
+const GalleryTab = ({ photos = [], onPhotoPress, professional }) => {
   // Función para manejar la presión en una foto
   const handlePhotoPress = (photo, index) => {
     if (onPhotoPress) {
@@ -22,7 +23,7 @@ const GalleryTab = ({ photos = [], onPhotoPress }) => {
   // Función para manejar el botón de agregar foto
   const handleAddPhoto = () => {
     // Placeholder - implementar lógica para agregar foto
-    alert('Agregar foto');
+    Alert.alert('Información', 'Agregar foto');
   };
 
   // Si no hay fotos, mostrar mensaje
@@ -47,6 +48,7 @@ const GalleryTab = ({ photos = [], onPhotoPress }) => {
         photos={photos} 
         onPhotoPress={handlePhotoPress}
         handleAddPhoto={handleAddPhoto}
+        professional={professional}
       />
     </View>
   );

@@ -191,6 +191,44 @@ export default function ChatScreen({ route }) {
   // Si llegamos con un professional desde otra pantalla
   const professional = route?.params?.professional;
   
+  // Cuando se navega con un profesional, iniciar chat con él
+  React.useEffect(() => {
+    if (professional && !activeConversation) {
+      // Comprobar si ya existe una conversación con este profesional
+      const existingConversation = conversations.find(
+        c => c.client && c.client.id === professional.id
+      );
+      
+      if (existingConversation) {
+        // Si existe, seleccionarla
+        handleSelectConversation(existingConversation);
+      } else {
+        // Si no existe, crear una nueva conversación simulada
+        const newConversation = {
+          id: `c${Date.now()}`,
+          client: {
+            id: professional.id || 'prof1',
+            name: professional.name || 'Profesional',
+            avatar: professional.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&h=200&fit=crop',
+            status: 'online',
+          },
+          lastMessage: {
+            text: '¡Hola! ¿En qué puedo ayudarte?',
+            time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+            isRead: true,
+            isSent: true,
+            sender: 'client'
+          },
+          unreadCount: 1,
+        };
+        
+        // Agregar la nueva conversación y seleccionarla
+        setConversations(prev => [newConversation, ...prev]);
+        setTimeout(() => handleSelectConversation(newConversation), 100);
+      }
+    }
+  }, [professional]);
+  
   // Configuración del header
   React.useLayoutEffect(() => {
     if (activeConversation) {
