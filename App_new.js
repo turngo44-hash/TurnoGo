@@ -6,7 +6,6 @@ import { ActivityIndicator, View } from 'react-native';
 import store from './src/store/store';
 import RootNavigator from './src/navigation/RootNavigator';
 import FirebaseAuthService from './src/services/FirebaseAuthService';
-import { CountryProvider } from './src/contexts/CountryContext';
 
 // Componente interno para manejar Firebase listener
 function AppWithFirebase() {
@@ -70,11 +69,9 @@ function AppWithFirebase() {
 export default function App() {
   return (
     <Provider store={store}>
-      <CountryProvider>
-        <NavigationContainer>
-          <AppWithFirebase />
-        </NavigationContainer>
-      </CountryProvider>
+      <NavigationContainer>
+        <AppWithFirebase />
+      </NavigationContainer>
     </Provider>
   );
 }
