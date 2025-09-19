@@ -3,6 +3,8 @@ import { Provider, useDispatch } from 'react-redux';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import store from './src/store/store';
 import RootNavigator from './src/navigation/RootNavigator';
 import FirebaseAuthService from './src/services/FirebaseAuthService';
@@ -69,12 +71,16 @@ function AppWithFirebase() {
 
 export default function App() {
   return (
-    <Provider store={store}>
-      <CountryProvider>
-        <NavigationContainer>
-          <AppWithFirebase />
-        </NavigationContainer>
-      </CountryProvider>
-    </Provider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <Provider store={store}>
+          <CountryProvider>
+            <NavigationContainer>
+              <AppWithFirebase />
+            </NavigationContainer>
+          </CountryProvider>
+        </Provider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
