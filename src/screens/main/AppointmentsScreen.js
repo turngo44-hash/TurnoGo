@@ -46,7 +46,7 @@ export default function AppointmentsScreen() {
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
   const [viewMode, setViewMode] = useState('day'); // day, week, month
-  const [zoomLevel, setZoomLevel] = useState(2); // 1: 60min, 2: 30min, 3: 15min
+  const [zoomScale, setZoomScale] = useState(1); // Factor de escala para el zoom (1 = normal)
   
   const calendarAnimation = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef(null);
@@ -55,10 +55,10 @@ export default function AppointmentsScreen() {
   const lastZoomChangeTime = useRef(0);
   const ZOOM_DEBOUNCE_TIME = 400; // Tiempo más largo entre cambios para evitar activaciones múltiples
   
-  // Implementación simplificada del gesto de zoom
+  // Implementación mejorada del gesto de zoom con límites más estrictos
   const pinchGesture = Gesture.Pinch()
     .onBegin(() => {
-      initialScale.current = 1;
+      initialScale.current = zoomScale;
     })
     .onChange((e) => {
       // Verificar si ha pasado suficiente tiempo desde el último cambio de zoom
@@ -67,19 +67,38 @@ export default function AppointmentsScreen() {
         return;
       }
       
-      // Umbrales más pequeños para requerir menos movimiento del pellizco
-      // Un cambio de solo 15% es suficiente para activar el zoom
-      if (e.scale > 1.15 && zoomLevel < 3) {
-        // Aumentar zoom (mostrar más detalle)
-        setZoomLevel(prev => Math.min(prev + 1, 3));
-        lastZoomChangeTime.current = now;
-      } else if (e.scale < 0.85 && zoomLevel > 1) {
-        // Reducir zoom (mostrar menos detalle)
-        setZoomLevel(prev => Math.max(prev - 1, 1));
+      // Límites de zoom ajustados según la solicitud
+      const MIN_ZOOM = 0.75;  // Mínimo un poco más grande como solicitado
+      const MAX_ZOOM = 1.1;   // Máximo más pequeño como solicitado
+      
+      // Aplicamos zoom continuo con límites controlados
+      const calculatedScale = e.scale * initialScale.current;
+      const newScale = Math.min(Math.max(calculatedScale, MIN_ZOOM), MAX_ZOOM);
+      
+      // Aplicamos cambios solo si el nuevo valor está dentro del rango aceptable
+      if (newScale >= MIN_ZOOM && newScale <= MAX_ZOOM) {
+        setZoomScale(newScale);
         lastZoomChangeTime.current = now;
       }
     });
 
+  // Función global para calcular la altura de cada slot de 15 minutos
+  const getSlotHeight = () => {
+    // Altura base para cada intervalo de 15 minutos
+    const baseHeight = 30;
+    
+    // Aplicamos una función de ajuste más suave para evitar que las líneas pierdan integridad
+    // Usamos una función que suaviza el zoom para prevenir superposiciones
+    let adjustedHeight = baseHeight * zoomScale;
+    
+    // Aseguramos que la altura tiene un valor mínimo para mantener legibilidad
+    const MIN_SLOT_HEIGHT = 20; 
+    // Y un máximo para evitar que las líneas se separen demasiado
+    const MAX_SLOT_HEIGHT = 50;
+    
+    return Math.min(Math.max(adjustedHeight, MIN_SLOT_HEIGHT), MAX_SLOT_HEIGHT);
+  };
+  
   // Calculate position for the current time indicator
   const calculateCurrentTimePosition = () => {
     const now = new Date();
@@ -91,23 +110,15 @@ export default function AppointmentsScreen() {
       return 0;
     }
     
-    // Calculate position based on slot height and zoom level
+    // Calculate position based on slot height
     const hoursFromStart = hours - 9; // Working hours start at 9:00
     const minutesAsDecimal = minutes / 60;
     const totalHoursFromStart = hoursFromStart + minutesAsDecimal;
     
-    // Define slots per hour based on zoom level
-    const slotsPerHour = (() => {
-      switch (zoomLevel) {
-        case 1: return 1;  // 60min intervals
-        case 2: return 2;  // 30min intervals
-        case 3: return 4;  // 15min intervals
-        default: return 4;
-      }
-    })();
+    // Usar siempre slots de 15 minutos
+    const slotsPerHour = 4;  // 15min intervals
     
-    // Each slot is 30px height
-    return totalHoursFromStart * slotsPerHour * 30;
+    return totalHoursFromStart * slotsPerHour * getSlotHeight();
   };
   
   // Generate calendar days for the current month
@@ -153,7 +164,7 @@ export default function AppointmentsScreen() {
   
   const calendarHeight = calendarAnimation.interpolate({
     inputRange: [0, 1],
-    outputRange: [110, 360],
+    outputRange: [150, 360],
   });
   
   // Load sample appointments
@@ -580,19 +591,8 @@ export default function AppointmentsScreen() {
     let interval;
     
     // Define interval based on zoom level
-    switch (zoomLevel) {
-      case 1: // Low detail - 60min intervals
-        interval = 60;
-        break;
-      case 2: // Medium detail - 30min intervals
-        interval = 30;
-        break;
-      case 3: // High detail - 15min intervals
-        interval = 15;
-        break;
-      default:
-        interval = 15;
-    }
+    // Use fixed 15-minute intervals, can be adjusted by zoomScale for visual sizing
+    interval = 15;
     
     for (let hour = 9; hour <= 18; hour++) {
       for (let minute = 0; minute < 60; minute += interval) {
@@ -631,17 +631,10 @@ export default function AppointmentsScreen() {
     });
   };
   
-  // Calculate how many slots an appointment spans based on zoom level
+  // Calculate how many slots an appointment spans
   const getAppointmentDurationInSlots = (appointment) => {
-    // Define slot duration in minutes based on zoom level
-    const slotDuration = (() => {
-      switch (zoomLevel) {
-        case 1: return 60;  // 60min intervals
-        case 2: return 30;  // 30min intervals
-        case 3: return 15;  // 15min intervals
-        default: return 15;
-      }
-    })();
+    // Using fixed 15-minute slot intervals for consistent timing
+    const slotDuration = 15;
     
     return Math.ceil(appointment.duration / slotDuration);
   };
@@ -651,23 +644,8 @@ export default function AppointmentsScreen() {
     const timeSlots = generateTimeSlots();
     const appointmentsForDate = fetchAppointmentsForDate(selectedDate);
     
-    if (!appointmentsForDate || appointmentsForDate.length === 0) {
-      return (
-        <View style={styles.noAppointmentsContainer}>
-          <Ionicons name="calendar-outline" size={64} color="#D1D5DB" />
-          <Text style={styles.noAppointmentsText}>No hay turnos para este día</Text>
-          <Text style={styles.noAppointmentsSubText}>
-            Programa un nuevo turno presionando el botón +
-          </Text>
-          <TouchableOpacity 
-            style={styles.createAppointmentButton}
-            onPress={createNewAppointment}
-          >
-            <Text style={styles.createAppointmentText}>Crear turno</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
+    // Siempre mostraremos la plantilla de horas, incluso cuando no haya turnos
+    // Solo cambiamos lo que se muestra en el área de turnos
     
     // Create an array of rendered appointment blocks to avoid duplicates
     const renderedAppointments = new Set();
@@ -684,61 +662,18 @@ export default function AppointmentsScreen() {
           removeClippedSubviews={false}
           nestedScrollEnabled={true}
         >
-        <View style={styles.timelineHeader}>
-          <Text style={styles.timelineHeaderText}>Hora</Text>
-          <Text style={styles.timelineHeaderText}>Agenda</Text>
-          <View style={styles.zoomControls}>
-            <TouchableOpacity
-              style={[styles.zoomButton, zoomLevel === 1 ? styles.zoomButtonActive : null]}
-              onPress={() => setZoomLevel(1)}
-              disabled={zoomLevel === 1}
-            >
-              <Text style={styles.zoomButtonText}>1h</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.zoomButton, zoomLevel === 2 ? styles.zoomButtonActive : null]}
-              onPress={() => setZoomLevel(2)}
-              disabled={zoomLevel === 2}
-            >
-              <Text style={styles.zoomButtonText}>30m</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.zoomButton, zoomLevel === 3 ? styles.zoomButtonActive : null]}
-              onPress={() => setZoomLevel(3)}
-              disabled={zoomLevel === 3}
-            >
-              <Text style={styles.zoomButtonText}>15m</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
         
         <View style={styles.timelineContent}>
           {/* Left column: Time labels */}
           <View style={styles.timeLabelsColumn}>
             {timeSlots.map((slot, index) => {
-              // Calcular altura según nivel de zoom (valores más precisos)
-              const getSlotHeight = () => {
-                switch (zoomLevel) {
-                  case 1: return 120; // 1 slot por hora = 120px
-                  case 2: return 60;  // 2 slots por hora = 60px cada uno
-                  case 3: return 30;  // 4 slots por hora = 30px cada uno
-                  default: return 30;
-                }
-              };
+              // Usamos la función global getSlotHeight
               
-              // Determinar si se debe mostrar esta etiqueta basada en el nivel de zoom
+              // Mostrar siempre todas las etiquetas de tiempo (horas, 15, 30, 45)
               const shouldShowLabel = () => {
                 const [hour, minute] = slot.split(':').map(Number);
-                const isHourLabel = minute === 0;
-                const isHalfHourLabel = minute === 30;
-                const isQuarterHourLabel = minute === 15 || minute === 45;
-                
-                switch (zoomLevel) {
-                  case 1: return isHourLabel; // Solo horas completas en zoom nivel 1
-                  case 2: return isHourLabel || isHalfHourLabel; // Horas completas y medias en zoom nivel 2
-                  case 3: return isHourLabel || isHalfHourLabel || isQuarterHourLabel; // Cada 15 minutos en zoom nivel 3
-                  default: return minute % 15 === 0;
-                }
+                // Siempre mostrar marcadores de tiempo en intervalos de 15 minutos
+                return minute % 15 === 0; // Muestra todas las marcas (00, 15, 30, 45)
               };
               
               // Determinar el tipo de etiqueta para estilizado diferencial
@@ -760,14 +695,24 @@ export default function AppointmentsScreen() {
                   <Text 
                     style={[
                       styles.timeLabelText,
-                      isHalfHourLabel && styles.timeLabelTextMedium,
-                      isQuarterHourLabel && styles.timeLabelTextSmall,
-                      // Color más suave para todas las marcas de tiempo
-                      { color: isFullHourLabel ? '#555555' : isHalfHourLabel ? '#888888' : '#aaaaaa' }
+                      // Estilo más compacto, alineado a la línea superior
+                      {
+                        fontSize: isFullHourLabel ? 10 : 9, // Ajustado para el formato con a.m./p.m.
+                        fontWeight: isFullHourLabel ? '500' : '400',
+                        color: isFullHourLabel ? '#333333' : '#9CA3AF',
+                        opacity: 1,
+                        textAlign: 'right',
+                        marginRight: isFullHourLabel ? 0 : 0, // Eliminado el margen para minutos
+                        marginTop: 0, // Alineado exactamente con la línea superior
+                        height: getSlotHeight() * 0.8, // Altura controlada para mejor alineación
+                      }
                     ]}
                     numberOfLines={1}
                   >
-                    {formatTime(slot)}
+                    {isFullHourLabel ? 
+                      // Formato con horas y a.m./p.m. como solicitado
+                      `${parseInt(slot.split(':')[0]) > 12 ? parseInt(slot.split(':')[0]) - 12 : parseInt(slot.split(':')[0])}${parseInt(slot.split(':')[0]) >= 12 ? 'p.m.' : 'a.m.'}` : 
+                      slot.split(':')[1]} {/* Solo mostrar minutos para 15, 30, 45 */}
                   </Text>
                 </View>
               );
@@ -778,66 +723,90 @@ export default function AppointmentsScreen() {
           <View style={styles.appointmentSlotsColumn}>
             {/* Hour divider lines */}
             {timeSlots.map((slot, index) => {
-              // Calcular altura según nivel de zoom
-              const getSlotHeight = () => {
-                switch (zoomLevel) {
-                  case 1: return 120; // 1 slot por hora = 120px
-                  case 2: return 60;  // 2 slots por hora = 60px cada uno
-                  case 3: return 30;  // 4 slots por hora = 30px cada uno
-                  default: return 30;
-                }
-              };
+              // Usamos la función global getSlotHeight
               
-              // Determinar si se debe mostrar esta línea divisoria
+              // Siempre mostrar todas las líneas divisorias de 15 minutos
               const shouldShowDivider = () => {
                 const [hour, minute] = slot.split(':').map(Number);
-                const isHourDivider = minute === 0;
-                const isHalfHourDivider = minute === 30;
-                
-                switch (zoomLevel) {
-                  case 1: return isHourDivider; // Solo horas completas en zoom nivel 1
-                  case 2: return isHourDivider || isHalfHourDivider; // Horas completas y medias en zoom nivel 2
-                  case 3: return minute % 15 === 0; // Cada 15 minutos en zoom nivel 3
-                  default: return minute % 15 === 0;
-                }
+                // Siempre mostrar líneas cada 15 minutos para mayor fluidez visual
+                return minute % 15 === 0;
               };
               
-              // Determinar el estilo de la línea (más oscura para horas completas)
+              // Determinar el estilo de la línea
               const isFullHourDivider = slot.endsWith(':00');
+              const isHalfHourDivider = slot.endsWith(':30');
+              const isQuarterHourDivider = slot.endsWith(':15') || slot.endsWith(':45');
               
               // Solo renderizar si debe mostrarse la línea
               if (!shouldShowDivider()) return null;
+              
+              // Configuración de estilo para líneas similar a Boosky
+              let opacity = 1;
+              let height = 1;
+              let backgroundColor = '#E9EAEE';
+              let borderStyle = 'solid'; // Líneas continuas como solicitado
+              
+              if (isFullHourDivider) {
+                // Horas completas - estilo Boosky más limpio
+                opacity = 1;
+                height = 1;
+                backgroundColor = '#DFE1E6'; // Gris medio como en Boosky
+              } else if (isHalfHourDivider) {
+                // Medias horas
+                opacity = 0.9;
+                height = 1;
+                backgroundColor = '#E5E7EC'; // Gris un poco más claro
+              } else if (isQuarterHourDivider) {
+                // Cuartos de hora
+                opacity = 0.7;
+                height = 1; // Mismo grosor para todas las líneas como en Boosky
+                backgroundColor = '#EBEDF2'; // Gris muy claro
+              }
               
               return (
                 <View 
                   key={`divider-${index}`} 
                   style={[
                     styles.hourDivider, 
-                    { top: index * getSlotHeight() },
+                    { 
+                      top: index * getSlotHeight(),
+                      opacity: opacity,
+                      height: height,
+                      backgroundColor: backgroundColor,
+                      // Sin sombras para un aspecto más plano como en Boosky
+                    },
                     isFullHourDivider && styles.fullHourDivider
                   ]} 
                 />
               );
             })}
             
-            {/* Time slots */}
+            {/* Time slots - solo para citas, sin slots vacíos que duplican líneas */}
             {timeSlots.map((timeSlot, index) => {
               const appointments = getAppointmentsForTimeSlot(timeSlot);
               
-              // Si no hay citas en este horario o ya se han renderizado todas
+              // Si no hay citas en este horario, no renderizamos nada visual
+              // Solo dejamos un receptor de toques invisible para la interactividad
               if (appointments.length === 0 || 
                   appointments.every(apt => renderedAppointments.has(apt.id))) {
                 return (
                   <TouchableOpacity 
                     key={`slot-${index}`} 
-                    style={[
-                      styles.timeSlot, 
-                      index % 4 === 0 && styles.hourStartSlot
-                    ]}
-                    onPress={() => setSelectedTimeSlot(timeSlot)}
-                  >
-                    {/* Empty view for spacing */}
-                  </TouchableOpacity>
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      height: getSlotHeight(),
+                      top: index * getSlotHeight(),
+                      zIndex: 10,
+                      backgroundColor: 'transparent' // Completamente transparente
+                    }}
+                    onPress={() => {
+                      setSelectedTimeSlot(timeSlot);
+                      // Abrir la pantalla para agendar un turno
+                      navigation.navigate('BookAppointment', { selectedTime: timeSlot, selectedDate: selectedDate });
+                    }}
+                  />
                 );
               }
               
@@ -907,15 +876,19 @@ export default function AppointmentsScreen() {
                 );
               }
               
-              // Empty slot
+              // Empty slot - sin elementos visuales que dupliquen líneas
               return (
                 <TouchableOpacity 
                   key={`slot-${index}`} 
-                  style={[
-                    styles.timeSlot, 
-                    selectedTimeSlot === timeSlot && styles.selectedEmptySlot,
-                    index % 4 === 0 && styles.hourStartSlot
-                  ]}
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    height: getSlotHeight(),
+                    top: index * getSlotHeight(),
+                    zIndex: 10,
+                    backgroundColor: selectedTimeSlot === timeSlot ? 'rgba(249, 230, 230, 0.3)' : 'transparent'
+                  }}
                   onPress={() => {
                     setSelectedTimeSlot(timeSlot);
                     // Open booking screen with this time pre-selected
@@ -942,87 +915,60 @@ export default function AppointmentsScreen() {
     );
   };
 
+  // Efecto para hacer scroll automático a la hora actual cuando se carga la pantalla
+  // El efecto existente en líneas 135-150 ya maneja esto, así que no necesitamos uno nuevo
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       
-      <View style={styles.header}>
-        <Text style={styles.title}>Turnos</Text>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity 
-            style={[styles.viewModeButton, viewMode === 'day' && styles.activeViewModeButton]} 
-            onPress={() => setViewMode('day')}
-          >
-            <Text style={[styles.viewModeText, viewMode === 'day' && styles.activeViewModeText]}>Día</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.viewModeButton, viewMode === 'week' && styles.activeViewModeButton]} 
-            onPress={() => setViewMode('week')}
-          >
-            <Text style={[styles.viewModeText, viewMode === 'week' && styles.activeViewModeText]}>Semana</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.viewModeButton, viewMode === 'month' && styles.activeViewModeButton]} 
-            onPress={() => setViewMode('month')}
-          >
-            <Text style={[styles.viewModeText, viewMode === 'month' && styles.activeViewModeText]}>Mes</Text>
-          </TouchableOpacity>
-        </View>
+      {/* Cabecera fija que incluye el calendario */}
+      <View style={styles.fixedHeader}>
+        <Animated.View style={[styles.calendarContainer, { height: calendarHeight, minHeight: 150 }]}>
+          <View style={styles.calendarHeader}>
+            <TouchableOpacity onPress={toggleCalendarView} style={styles.monthYearContainer}>
+              <Text style={styles.monthYearText}>
+                {monthsOfYear[selectedMonth]} {selectedYear}
+              </Text>
+              <Ionicons 
+                name={isCalendarExpanded ? "chevron-up" : "chevron-down"} 
+                size={20} 
+                color={colors.text} 
+              />
+            </TouchableOpacity>
+            
+            <View style={styles.navigationButtons}>
+              <TouchableOpacity onPress={goToPrevMonth} style={styles.navButton}>
+                <Ionicons name="chevron-back" size={22} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={goToNextMonth} style={styles.navButton}>
+                <Ionicons name="chevron-forward" size={22} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          {isCalendarExpanded ? (
+            renderMonthCalendar()
+          ) : (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              contentContainerStyle={styles.daysScrollView}
+              ref={scrollViewRef}
+              style={{minHeight: 80}}
+            >
+              {calendarDays.filter(day => day.isCurrentMonth).map((day, index) => (
+                <View key={`day-${index}`}>
+                  {renderDayItem({ item: day, index })}
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </Animated.View>
       </View>
       
-      <Animated.View style={[styles.calendarContainer, { height: calendarHeight }]}>
-        <View style={styles.calendarHeader}>
-          <TouchableOpacity onPress={toggleCalendarView} style={styles.monthYearContainer}>
-            <Text style={styles.monthYearText}>
-              {monthsOfYear[selectedMonth]} {selectedYear}
-            </Text>
-            <Ionicons 
-              name={isCalendarExpanded ? "chevron-up" : "chevron-down"} 
-              size={20} 
-              color={colors.text} 
-            />
-          </TouchableOpacity>
-          
-          <View style={styles.navigationButtons}>
-            <TouchableOpacity onPress={goToPrevMonth} style={styles.navButton}>
-              <Ionicons name="chevron-back" size={22} color={colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={goToNextMonth} style={styles.navButton}>
-              <Ionicons name="chevron-forward" size={22} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        {isCalendarExpanded ? (
-          renderMonthCalendar()
-        ) : (
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            contentContainerStyle={styles.daysScrollView}
-            ref={scrollViewRef}
-          >
-            {calendarDays.filter(day => day.isCurrentMonth).map((day, index) => (
-              <View key={`day-${index}`}>
-                {renderDayItem({ item: day, index })}
-              </View>
-            ))}
-          </ScrollView>
-        )}
-      </Animated.View>
-      
+      {/* Contenido scrollable (timeline) */}
       <View style={styles.appointmentsContainer}>
-        <View style={styles.dateHeader}>
-          <Text style={styles.selectedDateText}>
-            {selectedDate.getDate()} {monthsOfYear[selectedDate.getMonth()]} {selectedDate.getFullYear()}
-          </Text>
-          <View style={styles.dateBadge}>
-            <Text style={styles.dateBadgeText}>
-              {fetchAppointmentsForDate(selectedDate)?.length || 0} turnos
-            </Text>
-          </View>
-        </View>
-        
         {renderAppointmentsForSelectedDate()}
       </View>
       
@@ -1040,6 +986,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
+  },
+  fixedHeader: {
+    backgroundColor: '#FFFFFF',
+    zIndex: 10,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
   },
   header: {
     flexDirection: 'row',
@@ -1085,8 +1048,12 @@ const styles = StyleSheet.create({
   },
   calendarContainer: {
     backgroundColor: '#FFFFFF',
-    paddingBottom: 8,
-    overflow: 'hidden',
+    paddingBottom: 15,
+    paddingTop: 5,
+    overflow: 'visible',
+    marginBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   calendarHeader: {
     flexDirection: 'row',
@@ -1116,18 +1083,34 @@ const styles = StyleSheet.create({
   daysScrollView: {
     paddingLeft: 8,
     paddingRight: 8,
+    paddingBottom: 12,
+    paddingTop: 8,
+    minHeight: 80,
+    alignItems: 'center',
   },
   dayItem: {
     width: width / 7 - 8,
-    height: 70,
+    height: 60,
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 4,
+    marginBottom: 5,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#FFFFFF',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   selectedDayItem: {
     backgroundColor: colors.primary,
+    height: 60,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   otherMonthDayItem: {
     opacity: 0.4,
@@ -1223,8 +1206,9 @@ const styles = StyleSheet.create({
   },
   appointmentsContainer: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
+    paddingBottom: 80, // Espacio para que no se oculte contenido bajo el FAB
+    width: '100%', // Aseguramos ancho completo
   },
   dateHeader: {
     flexDirection: 'row',
@@ -1404,8 +1388,15 @@ const styles = StyleSheet.create({
   timelineContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
     marginBottom: 20,
+    minHeight: 300, // Altura mínima para asegurar visibilidad de contenido
+    width: '100%',
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
   },
   timelineHeader: {
     flexDirection: 'row',
@@ -1413,7 +1404,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
   },
@@ -1427,23 +1418,27 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   timeLabelsColumn: {
-    width: 40, // Reducido aún más a 40px
+    width: 48, // Reducido como solicitado
     backgroundColor: '#FFFFFF',
-    alignItems: 'flex-end', // Alineamos a la derecha
-    paddingRight: 6, // Pequeño padding derecho
-    paddingTop: 4,
+    alignItems: 'flex-end',
+    paddingRight: 5, // Margen derecho más pequeño
+    paddingTop: 0,
+    borderRightWidth: 1,
+    borderRightColor: '#F0F0F5',
   },
   appointmentSlotsColumn: {
     flex: 1,
     position: 'relative',
+    backgroundColor: '#FFFFFF',
+    paddingLeft: 4,
   },
   timeLabel: {
     // El alto se ajusta dinámicamente en el componente
     height: 120, // Valor predeterminado, será ajustado en tiempo de ejecución
     width: '100%',
     justifyContent: 'flex-start',
-    alignItems: 'center',
-    paddingTop: 6,
+    alignItems: 'flex-end', // Alineación a la derecha
+    paddingTop: 0, // Sin padding superior para que esté justo debajo de la línea
   },
   timeLabelText: {
     fontSize: 11,
@@ -1457,31 +1452,31 @@ const styles = StyleSheet.create({
   },
   timeSlot: {
     height: 30,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent', // Transparente para evitar duplicación visual
+    transition: 'background-color 0.2s ease',
   },
   hourStartSlot: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    // Eliminamos bordes que duplican las líneas divisorias
   },
   selectedEmptySlot: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: '#F9E6E6',
   },
   appointmentBlock: {
     position: 'absolute',
     left: 0,
     right: 0,
-    padding: 8,
+    padding: 10,
     backgroundColor: '#FFFFFF',
-    borderRadius: 4,
+    borderRadius: 8,
     marginHorizontal: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
     zIndex: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
   },
   appointmentBlockHeader: {
     flexDirection: 'row',
@@ -1498,13 +1493,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 1,
-    backgroundColor: '#F3F4F6',
-    zIndex: 5,
+    height: 1, // Grosor uniforme como en Boosky
+    backgroundColor: '#E9EAEE', // Color base tipo Boosky
+    zIndex: 2, // Específicamente bajo para evitar que cubra las interacciones
+    // Líneas rectas sin bordes redondeados como en Boosky
+    borderRadius: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.02,
+    shadowRadius: 1,
   },
   fullHourDivider: {
-    backgroundColor: '#E5E7EB',
-    height: 1,
+    backgroundColor: '#E0E0E5', // Color más elegante para horas completas
+    height: 1.5, // Línea ligeramente más gruesa
   },
   currentTimeIndicator: {
     position: 'absolute',
@@ -1515,34 +1516,45 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   currentTimeIndicatorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: colors.primary,
-    marginLeft: 54,
-    marginRight: -6,
+    marginLeft: 40,
+    marginRight: -5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 4,
   },
   currentTimeIndicatorLine: {
     flex: 1,
-    height: 2,
+    height: 1.5,
     backgroundColor: colors.primary,
     zIndex: 20,
+    opacity: 0.8,
   },
   timelineProfessionalImage: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    marginRight: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: '#F0F0F5',
   },
   timelineProfessionalName: {
-    fontSize: 11,
-    color: '#6B7280',
+    fontSize: 12,
+    color: '#555555',
+    fontWeight: '400',
+    letterSpacing: 0.1,
   },
   appointmentClientName: {
-    fontSize: 12,
-    color: '#374151',
-    fontWeight: '500',
-    marginBottom: 4,
+    fontSize: 13,
+    color: '#333333',
+    fontWeight: '600',
+    marginBottom: 5,
+    letterSpacing: 0.2,
   },
   zoomControls: {
     flexDirection: 'row',
@@ -1566,19 +1578,25 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   timeLabelText: {
-    fontSize: 11,
+    fontSize: 11, // Reducido significativamente para mejor ajuste con zoom
     fontWeight: '500',
-    color: '#444444',
+    color: '#333333',
+    letterSpacing: 0,
+    fontFamily: 'System',
+    textAlign: 'right',
+    padding: 0, // Eliminado el padding para ajuste más preciso
   },
   timeLabelTextMedium: {
-    fontSize: 9,
+    fontSize: 9, // Reducido para minutos
     fontWeight: '400',
-    color: '#777777',
+    color: '#9CA3AF',
+    letterSpacing: 0,
   },
   timeLabelTextSmall: {
-    fontSize: 8,
-    fontWeight: '300',
-    color: '#999999',
+    fontSize: 9, // Mismo tamaño para todas las marcas de minutos
+    fontWeight: '400',
+    color: '#9CA3AF',
+    letterSpacing: 0.1,
   },
   multipleAppointmentsContainer: {
     flexDirection: 'row',
