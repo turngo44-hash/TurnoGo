@@ -1,16 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
-  FlatList,
   ScrollView,
   Animated,
   Dimensions,
   StatusBar,
-  Image,
-  PanResponder,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -18,16 +15,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import colors from '../../constants/colors';
-import AppointmentTimelineCard from './components/AppointmentTimelineCard';
 
-// Helper to check if two dates are the same day
-const isSameDay = (date1, date2) => {
-  return (
-    date1.getDate() === date2.getDate() &&
-    date1.getMonth() === date2.getMonth() &&
-    date1.getFullYear() === date2.getFullYear()
-  );
-};
+// Importar componentes
+import CalendarHeader from './components/CalendarHeader';
+import CalendarDay from './components/CalendarDay';
+import TimelineView from './components/TimelineView';
+
+// Importar utilidades
+import { isSameDay, formatSelectedDate, formatTime, calculateEndTime } from './utils/appointmentUtils';
+
+// Importar estilos
+import styles from './styles/AppointmentsScreenStyles';
+
+// Using formatSelectedDate from imported utils
 
 const { width } = Dimensions.get('window');
 
@@ -53,74 +53,91 @@ export default function AppointmentsScreen() {
   const scrollViewRef = useRef(null);
   const timelineScrollRef = useRef(null);
   const initialScale = useRef(1);
+  const isPinching = useRef(false); // Nueva referencia para detectar si estamos en un gesto de pellizco
   const lastZoomChangeTime = useRef(0);
   const ZOOM_DEBOUNCE_TIME = 400; // Tiempo más largo entre cambios para evitar activaciones múltiples
   
-  // Implementación mejorada del gesto de zoom con límites más estrictos
+  // Referencia para almacenar la posición de scroll actual
+  const currentScrollPosition = useRef(0);
+  
+  // Implementación mejorada del gesto de zoom con animación fluida y preservando la posición de scroll
   const pinchGesture = Gesture.Pinch()
     .onBegin(() => {
       initialScale.current = zoomScale;
+      isPinching.current = true; // Marcamos que ha comenzado un gesto de pellizco
+      
+      // Guardamos la posición actual del scroll al iniciar el pellizco
+      if (timelineScrollRef.current) {
+        // No podemos acceder directamente al scrollY, así que usamos la última posición conocida
+        // que actualizamos en el onScroll del ScrollView
+      }
     })
     .onChange((e) => {
-      // Verificar si ha pasado suficiente tiempo desde el último cambio de zoom
-      const now = Date.now();
-      if (now - lastZoomChangeTime.current < ZOOM_DEBOUNCE_TIME) {
-        return;
-      }
-      
-      // Límites de zoom ajustados según la solicitud
-      const MIN_ZOOM = 0.75;  // Mínimo un poco más grande como solicitado
-      const MAX_ZOOM = 1.1;   // Máximo más pequeño como solicitado
+      // Límites de zoom ajustados para una mejor experiencia
+      const MIN_ZOOM = 0.75;
+      const MAX_ZOOM = 1.1;
       
       // Aplicamos zoom continuo con límites controlados
       const calculatedScale = e.scale * initialScale.current;
       const newScale = Math.min(Math.max(calculatedScale, MIN_ZOOM), MAX_ZOOM);
       
-      // Aplicamos cambios solo si el nuevo valor está dentro del rango aceptable
-      if (newScale >= MIN_ZOOM && newScale <= MAX_ZOOM) {
-        setZoomScale(newScale);
-        lastZoomChangeTime.current = now;
-      }
+      // Aplicamos cambios directamente para mayor fluidez
+      setZoomScale(newScale);
+      
+      // Prevenimos explícitamente cualquier auto-scroll durante el pellizco
+      // No hacemos nada más aquí, solo aseguramos que isPinching sea true
+      isPinching.current = true;
+    })
+    .onEnd(() => {
+      // Marcamos que ha finalizado el gesto de pellizco después de un pequeño retraso
+      // para evitar que el efecto de autodesplazamiento se active inmediatamente
+      setTimeout(() => {
+        isPinching.current = false;
+      }, 500);
     });
 
-  // Función global para calcular la altura de cada slot de 15 minutos
-  const getSlotHeight = () => {
+  // Función optimizada para calcular la altura de cada slot de 15 minutos
+  const getSlotHeight = useCallback(() => {
     // Altura base para cada intervalo de 15 minutos
     const baseHeight = 30;
     
-    // Aplicamos una función de ajuste más suave para evitar que las líneas pierdan integridad
-    // Usamos una función que suaviza el zoom para prevenir superposiciones
+    // Calculamos directamente la altura con el factor de zoom actual
+    // sin procesamiento adicional para mayor fluidez
     let adjustedHeight = baseHeight * zoomScale;
     
-    // Aseguramos que la altura tiene un valor mínimo para mantener legibilidad
+    // Aseguramos límites para mantener la usabilidad
     const MIN_SLOT_HEIGHT = 20; 
-    // Y un máximo para evitar que las líneas se separen demasiado
     const MAX_SLOT_HEIGHT = 50;
     
     return Math.min(Math.max(adjustedHeight, MIN_SLOT_HEIGHT), MAX_SLOT_HEIGHT);
-  };
+  }, [zoomScale]);
   
-  // Calculate position for the current time indicator
-  const calculateCurrentTimePosition = () => {
+  // Función optimizada para calcular la posición del indicador de hora actual
+  const calculateCurrentTimePosition = useCallback(() => {
     const now = new Date();
     const hours = now.getHours();
     const minutes = now.getMinutes();
     
-    // If current time is outside working hours, return 0
-    if (hours < 9 || hours >= 18) {
-      return 0;
+    // Si estamos fuera del horario laboral, manejar de manera inteligente
+    if (hours < 9) {
+      return 0; // Al inicio del día, mostrar desde el principio
+    }
+    if (hours >= 18) {
+      // Al final del día, mostrar última hora visible
+      const totalSlots = (18 - 9) * 4; // Total de slots de 15min entre 9:00 y 18:00
+      return totalSlots * getSlotHeight() - 60; // Ajustar para mostrar el final del día
     }
     
-    // Calculate position based on slot height
-    const hoursFromStart = hours - 9; // Working hours start at 9:00
+    // Cálculo preciso basado en la altura de los slots
+    const hoursFromStart = hours - 9; // Las horas laborables comienzan a las 9:00
     const minutesAsDecimal = minutes / 60;
     const totalHoursFromStart = hoursFromStart + minutesAsDecimal;
     
-    // Usar siempre slots de 15 minutos
-    const slotsPerHour = 4;  // 15min intervals
+    // Usar siempre slots de 15 minutos (4 por hora)
+    const slotsPerHour = 4;
     
     return totalHoursFromStart * slotsPerHour * getSlotHeight();
-  };
+  }, [getSlotHeight]); // Dependencia en getSlotHeight para recalcular si cambia el zoom
   
   // Generate calendar days for the current month
   useEffect(() => {
@@ -137,29 +154,46 @@ export default function AppointmentsScreen() {
     loadSampleAppointments();
   }, []);
   
-  // Scroll to current time if viewing today
+  // Scroll automático SOLO cuando cambia la fecha seleccionada (nunca durante o después del zoom)
   useEffect(() => {
+    // Variable para rastrear si este efecto fue llamado por un cambio de fecha
+    const isDateChange = true; // Siempre true porque este efecto solo se activa con cambio de fecha
+    
+    // Solo ejecutamos el auto-scroll si:
+    // 1. Es un cambio de fecha (no por zoom)
+    // 2. No estamos en medio de un gesto de pellizco
+    // 3. Estamos viendo el día actual
+    // 4. El timeline scroll ref está disponible
     if (
+      isDateChange &&
+      !isPinching.current && 
       timelineScrollRef.current && 
-      isSameDay(selectedDate, new Date()) &&
-      viewMode === 'day'
+      isSameDay(selectedDate, new Date())
     ) {
-      // Allow time for the layout to complete, then scroll
+      // Esperamos menos tiempo para una respuesta más inmediata
       setTimeout(() => {
-        const scrollPosition = calculateCurrentTimePosition() - 100; // Scroll so current time is visible with some padding
-        if (scrollPosition > 0) {
-          timelineScrollRef.current.scrollTo({ y: scrollPosition, animated: true });
+        // Verificamos nuevamente que no se haya iniciado un gesto de pellizco
+        if (!isPinching.current) {
+          const scrollPosition = calculateCurrentTimePosition() - 150; // Centrar mejor la hora actual
+          if (scrollPosition > 0) {
+            timelineScrollRef.current.scrollTo({ 
+              y: scrollPosition, 
+              animated: true,
+              duration: 300 
+            });
+          }
         }
-      }, 500);
+      }, 300);
     }
-  }, [selectedDate, viewMode]);
+  }, [selectedDate]); // Solo dependemos de selectedDate, no del cálculo de posición
   
-  // Animation for calendar expand/collapse
+  // Animation for calendar expand/collapse - optimizada para mayor fluidez
   useEffect(() => {
     Animated.timing(calendarAnimation, {
       toValue: isCalendarExpanded ? 1 : 0,
-      duration: 300,
-      useNativeDriver: false,
+      duration: 200, // Más rápida para mejor respuesta
+      useNativeDriver: false, // No podemos usar driver nativo para height
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1), // Añadimos una curva de ease-out para suavidad
     }).start();
   }, [isCalendarExpanded]);
   
@@ -171,77 +205,68 @@ export default function AppointmentsScreen() {
   // Load sample appointments
   const loadSampleAppointments = async () => {
     try {
-      // Create sample appointments for demo with today's date (Wednesday)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // Reset time to start of day
+      // Check if we have stored sample data
+      const storedAppointments = await AsyncStorage.getItem('sampleAppointments');
       
-      // Create specific appointments for Wednesday as requested
-      const sampleData = [
-        {
-          id: '1',
-          clientName: 'Roberto Sánchez Mendoza',
-          service: 'Corte y barba',
-          date: today,
-          time: '10:00', // 10:00 AM
-          duration: 60, // 1 hour duration
-          price: 25.00,
-          confirmed: true,
-          professionalId: 'prof1',
-          professionalName: 'Carlos Méndez',
-          professionalImage: 'https://randomuser.me/api/portraits/men/32.jpg',
-          notes: 'Cliente regular, corte clásico con barba completa',
-          status: 'confirmed',
-        },
-        {
-          id: '2',
-          clientName: 'Kevin Rodríguez',
-          service: 'Afeitado rápido',
-          date: today,
-          time: '11:15', // 11:15 AM
-          duration: 15, // 15 min duration
-          price: 12.00,
-          confirmed: true,
-          professionalId: 'prof2',
-          professionalName: 'Laura Torres',
-          professionalImage: 'https://randomuser.me/api/portraits/women/44.jpg',
-          notes: 'Solo afeitado rápido sin corte',
-          status: 'confirmed',
-        },
-        {
-          id: '3',
-          clientName: 'Francisco Jiménez Vega',
-          service: 'Corte completo + barba',
-          date: today,
-          time: '13:00', // 1:00 PM
-          duration: 60, // 1 hour duration
-          price: 35.00,
-          confirmed: true,
-          professionalId: 'prof1',
-          professionalName: 'Carlos Méndez',
-          professionalImage: 'https://randomuser.me/api/portraits/men/32.jpg',
-          notes: 'Cliente nuevo, corte moderno con degradado y barba perfilada',
-          status: 'confirmed',
-        },
-        {
-          id: '4',
-          clientName: 'Alejandro Ruiz',
-          service: 'Barba y bigote',
-          date: today,
-          time: '13:00', // 1:00 PM (mismo horario)
-          duration: 45, // 45 min duration
-          price: 20.00,
-          confirmed: false,
-          professionalId: 'prof2',
-          professionalName: 'Laura Torres',
-          professionalImage: 'https://randomuser.me/api/portraits/women/44.jpg',
-          notes: 'Arreglo de barba y bigote con recorte',
-          status: 'pending',
-        },
-      ];
+      if (storedAppointments) {
+        setAppointments(JSON.parse(storedAppointments));
+      } else {
+        // Create sample appointments for demo
+        const today = new Date();
+        const tomorrow = new Date();
+        tomorrow.setDate(today.getDate() + 1);
         
-      // Store the appointments in AsyncStorage
-      await AsyncStorage.setItem('sampleAppointments', JSON.stringify(sampleData));
-      setAppointments(sampleData);
+        const sampleData = [
+          {
+            id: '1',
+            clientName: 'Ana García',
+            service: 'Corte de cabello',
+            date: today,
+            time: '10:15',
+            duration: 45,
+            price: 25.00,
+            confirmed: true,
+            professionalId: 'prof1',
+            professionalName: 'Carlos Méndez',
+            professionalImage: 'https://randomuser.me/api/portraits/men/32.jpg',
+            notes: 'Cliente regular, prefiere corte degradado',
+            status: 'confirmed',
+          },
+          {
+            id: '2',
+            clientName: 'Roberto Sánchez',
+            service: 'Afeitado completo',
+            date: today,
+            time: '11:30',
+            duration: 30,
+            price: 18.00,
+            confirmed: true,
+            professionalId: 'prof2',
+            professionalName: 'Laura Torres',
+            professionalImage: 'https://randomuser.me/api/portraits/women/44.jpg',
+            notes: '',
+            status: 'confirmed',
+          },
+          {
+            id: '3',
+            clientName: 'Sofía Martínez',
+            service: 'Coloración',
+            date: tomorrow,
+            time: '09:30',
+            duration: 90,
+            price: 65.00,
+            confirmed: false,
+            professionalId: 'prof1',
+            professionalName: 'Carlos Méndez',
+            professionalImage: 'https://randomuser.me/api/portraits/men/32.jpg',
+            notes: 'Primera vez, quiere cambio de look radical',
+            status: 'pending',
+          },
+        ];
+        
+        await AsyncStorage.setItem('sampleAppointments', JSON.stringify(sampleData));
+        setAppointments(sampleData);
+      }
     } catch (error) {
       console.error('Error loading sample appointments:', error);
     }
@@ -364,6 +389,22 @@ export default function AppointmentsScreen() {
     }
   };
   
+  // Ir al día actual
+  const goToToday = () => {
+    const today = new Date();
+    const todayMonth = today.getMonth();
+    const todayYear = today.getFullYear();
+    
+    // Actualizar mes y año si son diferentes
+    if (todayMonth !== selectedMonth || todayYear !== selectedYear) {
+      setSelectedMonth(todayMonth);
+      setSelectedYear(todayYear);
+    }
+    
+    // Seleccionar el día actual
+    selectDate(today);
+  };
+  
   // Select a date
   const selectDate = (date) => {
     setSelectedDate(date);
@@ -377,44 +418,9 @@ export default function AppointmentsScreen() {
     setIsCalendarExpanded(!isCalendarExpanded);
   };
   
-  // Format time (24h to 12h)
-  const formatTime = (time) => {
-    const [hours, minutes] = time.split(':');
-    const hour = parseInt(hours, 10);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const formattedHour = hour % 12 || 12;
-    
-    // Para las horas completas - formato simplificado (9AM)
-    if (minutes === '00') {
-      return `${formattedHour}${ampm}`;
-    }
-    
-    // Para las medias horas - solo mostrar número con formato más sutil (30)
-    if (minutes === '30') {
-      return `·${minutes}`;
-    }
-    
-    // Para los cuartos de hora - solo mostrar número con formato más sutil (15, 45)
-    if (minutes === '15' || minutes === '45') {
-      return `·${minutes}`;
-    }
-    
-    // Formato completo para otros casos (aunque no deberían usarse)
-    return `${formattedHour}:${minutes}`;
-  };
+  // Using formatTime from imported utils
   
-  // Calculate end time
-  const calculateEndTime = (startTime, durationMinutes) => {
-    const [hours, minutes] = startTime.split(':').map(Number);
-    const startDate = new Date();
-    startDate.setHours(hours, minutes, 0);
-    
-    const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
-    const endHours = endDate.getHours();
-    const endMinutes = endDate.getMinutes();
-    
-    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
-  };
+  // Using calculateEndTime from imported utils
   
   // Create a new appointment
   const createNewAppointment = () => {
@@ -665,12 +671,17 @@ export default function AppointmentsScreen() {
       <GestureDetector gesture={pinchGesture}>
         <ScrollView 
           ref={timelineScrollRef}
-          style={[styles.timelineContainer, { flex: 1 }]}
+          style={styles.timelineContainer}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ flexGrow: 1, paddingBottom: 0 }}
+          contentContainerStyle={{ paddingBottom: 0 }} // Eliminamos el padding inferior por completo
           // Configuración para evitar el warning de VirtualizedList
           removeClippedSubviews={false}
           nestedScrollEnabled={true}
+          // Capturamos la posición de scroll actual para mantenerla durante el zoom
+          onScroll={(e) => {
+            currentScrollPosition.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16} // Frecuencia de actualización (60fps)
         >
         
         <View style={styles.timelineContent}>
@@ -783,7 +794,6 @@ export default function AppointmentsScreen() {
                       opacity: opacity,
                       height: height,
                       backgroundColor: backgroundColor,
-                      zIndex: 10, // Z-index bajo para que las líneas estén detrás de las tarjetas
                       // Sin sombras para un aspecto más plano como en Boosky
                     },
                     isFullHourDivider && styles.fullHourDivider
@@ -830,41 +840,75 @@ export default function AppointmentsScreen() {
                 // Marcar estas citas como renderizadas
                 appointmentsToRender.forEach(apt => renderedAppointments.add(apt.id));
                 
-                // Contenedor horizontal para múltiples citas
+                // Contenedor para múltiples citas con posicionamiento absoluto para mantener la alineación con la línea de tiempo
                 return (
-                  <> 
+                  <View 
+                    key={`slot-container-${index}`}
+                    style={[
+                      styles.multipleAppointmentsContainer,
+                      {
+                        position: 'absolute',
+                        top: index * getSlotHeight(),
+                        left: 0,
+                        right: 0,
+                        zIndex: 30, // Mayor que otros elementos para asegurar visibilidad
+                      }
+                    ]}
+                  >
                     {appointmentsToRender.map((appointment, aptIndex) => {
                       // Calcular slots que ocupa esta cita
                       const slotsCount = getAppointmentDurationInSlots(appointment);
-                      // Always reserve space for 2 columns so single appointments still take half-width
-                      const columns = Math.max(2, appointmentsToRender.length);
-                      const widthPercent = 100 / columns;
-                      const leftPercent = aptIndex * widthPercent;
-
+                      
+                      // Siempre usamos la mitad del ancho como solicitado (para 2 columnas)
+                      // Independientemente de la cantidad de citas
+                      const appointmentWidth = '48%';
+                      
                       return (
-                        <TouchableOpacity
+                        <TouchableOpacity 
                           key={`apt-${appointment.id}`}
-                          style={{
-                            height: slotsCount * getSlotHeight(),
-                            position: 'absolute',
-                            left: `${leftPercent}%`,
-                            width: `${widthPercent}%`,
-                            top: index * getSlotHeight(),
-                            zIndex: 20,
-                            paddingHorizontal: 6,
-                            overflow: 'hidden', // asegurar que la tarjeta no sobresalga del área
-                          }}
+                          style={[
+                            styles.appointmentBlock,
+                            { 
+                              height: slotsCount * 30, // Altura según duración
+                              width: appointmentWidth,
+                              paddingTop: 0, // Sin padding superior para alinear con la línea
+                              paddingBottom: 0, // Sin padding inferior para alinear con la línea
+                              paddingHorizontal: 6, // Padding horizontal reducido para compactar
+                            },
+                            appointment.status === 'confirmed' ? styles.confirmedAppointment : styles.pendingAppointment,
+                            index % 4 === 0 && styles.hourStartSlot,
+                            aptIndex > 0 && styles.adjacentAppointment, // Estilo especial para citas adicionales
+                            appointment.duration <= 15 && styles.shortAppointment // Estilo para citas cortas (5-15 min)
+                          ]}
                           onPress={() => navigation.navigate('AppointmentDetails', { appointment })}
-                          onLongPress={() => alert('Mantenga presionado para mover la cita')}
                         >
-                          <AppointmentTimelineCard
-                            appointment={appointment}
-                            isShort={appointment.duration <= 15}
-                          />
+                          {/* Nombre del cliente primero */}
+                          <Text style={[
+                            styles.appointmentClientName, 
+                            appointment.duration <= 15 && styles.shortAppointmentClientName
+                          ]} numberOfLines={1}>
+                            {appointment.clientName}
+                          </Text>
+                          
+                          {/* Rango de horas debajo */}
+                          <Text style={styles.appointmentTimeRange} numberOfLines={1}>
+                            {formatTime(appointment.time)} - {formatTime(calculateEndTime(appointment.time, appointment.duration))}
+                          </Text>
+                          
+                          {/* Solo mostramos el servicio si la cita es de más de 15 minutos */}
+                          {appointment.duration > 15 && (
+                            <Text style={styles.appointmentServiceCompact} numberOfLines={1}>{appointment.service}</Text>
+                          )}
+                          
+                          {/* Indicador de estado (punto de color) */}
+                          <View style={[
+                            styles.statusDotCompact,
+                            { backgroundColor: appointment.status === 'confirmed' ? '#10B981' : '#FBBF24' }
+                          ]} />
                         </TouchableOpacity>
                       );
                     })}
-                  </>
+                  </View>
                 );
               }
               
@@ -911,16 +955,16 @@ export default function AppointmentsScreen() {
   // El efecto existente en líneas 135-150 ya maneja esto, así que no necesitamos uno nuevo
 
   return (
-  <SafeAreaView style={styles.container} edges={['top', 'left', 'right']} >
-      <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" translucent={false} />
       
       {/* Cabecera fija que incluye el calendario */}
       <View style={styles.fixedHeader}>
-        <Animated.View style={[styles.calendarContainer, { height: calendarHeight, minHeight: 140 }]}>
+        <Animated.View style={[styles.calendarContainer, { height: calendarHeight, minHeight: 150 }]}>
           <View style={styles.calendarHeader}>
             <TouchableOpacity onPress={toggleCalendarView} style={styles.monthYearContainer}>
               <Text style={styles.monthYearText}>
-                {monthsOfYear[selectedMonth]} {selectedYear}
+                {formatSelectedDate(selectedDate)}
               </Text>
               <Ionicons 
                 name={isCalendarExpanded ? "chevron-up" : "chevron-down"} 
@@ -933,8 +977,8 @@ export default function AppointmentsScreen() {
               <TouchableOpacity onPress={goToPrevMonth} style={styles.navButton}>
                 <Ionicons name="chevron-back" size={22} color={colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={goToNextMonth} style={styles.navButton}>
-                <Ionicons name="chevron-forward" size={22} color={colors.text} />
+              <TouchableOpacity onPress={goToToday} style={[styles.navButton, styles.todayButton]}>
+                <Text style={styles.todayButtonText}>Hoy</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -973,13 +1017,6 @@ export default function AppointmentsScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF', // Cambiado a blanco para eliminar el espacio gris
-  },
-  fixedHeader: {
     backgroundColor: '#FFFFFF',
     zIndex: 10,
     elevation: 5,
@@ -987,9 +1024,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    marginBottom: 0, // Eliminado el espacio adicional
+    // Eliminamos la línea inferior
   },
   scrollContainer: {
     flex: 1,
@@ -1041,12 +1076,11 @@ const styles = StyleSheet.create({
   },
   calendarContainer: {
     backgroundColor: '#FFFFFF',
-    paddingBottom: 8,
+    paddingBottom: 5, // Reducimos el padding inferior
     paddingTop: 5,
     overflow: 'visible',
-    marginBottom: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    marginBottom: 0, // Quitamos el margen inferior
+    // Eliminamos la línea horizontal
   },
   calendarHeader: {
     flexDirection: 'row',
@@ -1073,22 +1107,32 @@ const styles = StyleSheet.create({
     padding: 4,
     marginLeft: 8,
   },
-
+  todayButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  todayButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '500',
+    fontSize: 14,
+  },
   daysScrollView: {
     paddingLeft: 8,
     paddingRight: 8,
-    paddingBottom: 5,  // Reducido el padding inferior
+    paddingBottom: 12,
     paddingTop: 8,
-    minHeight: 70,     // Reducida la altura mínima
+    minHeight: 80,
     alignItems: 'center',
   },
   dayItem: {
     width: width / 7 - 8,
-    height: 55,  // Reducida la altura
+    height: 60,
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 4,
-    marginBottom: 2,  // Reducido el margen inferior
+    marginBottom: 5,
     borderRadius: 10,
     backgroundColor: '#FFFFFF',
     shadowColor: "#000",
@@ -1200,8 +1244,8 @@ const styles = StyleSheet.create({
   },
   appointmentsContainer: {
     flex: 1,
-    paddingTop: 0,  // Eliminado el padding superior
-    paddingBottom: 0, // Eliminado el espacio inferior para que el área de trabajo llegue hasta abajo
+    paddingTop: 0, // Eliminamos el padding superior
+    paddingBottom: 0, // Eliminamos todo el padding inferior
     width: '100%', // Aseguramos ancho completo
     backgroundColor: '#FFFFFF', // Fondo blanco
   },
@@ -1364,8 +1408,8 @@ const styles = StyleSheet.create({
   },
   fabButton: {
     position: 'absolute',
-    bottom: 24,
-    right: 24,
+    bottom: 20, // Ajustamos para que esté más cerca del borde inferior
+    right: 20,
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -1374,27 +1418,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    zIndex: 1000, // Asegurar que esté por encima de todo
+    shadowOpacity: 0.2,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 5, // Mayor elevación para mejor efecto "flotante"
+    zIndex: 1000, // Aseguramos que esté por encima de todo
   },
   
   // Timeline view styles
   timelineContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    marginBottom: 0,
-    marginTop: 0, // Eliminado el margen superior
+    marginBottom: 0, // Eliminamos el margen inferior
     minHeight: 300, // Altura mínima para asegurar visibilidad de contenido
     width: '100%',
-    borderRadius: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-    paddingBottom: 0,
+    borderRadius: 0, // Quitamos los bordes redondeados
+    // Quitamos todas las sombras para un diseño más limpio
+    elevation: 0,
   },
   timelineHeader: {
     flexDirection: 'row',
@@ -1460,21 +1499,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9E6E6',
   },
   appointmentBlock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    padding: 10,
+    position: 'relative',
+    padding: 4, // Padding reducido para mayor compactación
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    marginHorizontal: 4,
+    borderRadius: 6, // Bordes más suaves
+    marginHorizontal: 2, // Margen horizontal reducido
+    marginVertical: 0, // Sin margen vertical para alinear exactamente con las líneas
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 5,  // Aumentado para mayor prominencia
-    zIndex: 20,    // Aumentado para asegurar que esté por encima de las líneas
+    shadowRadius: 2,
+    elevation: 2, // Elevación reducida
+    zIndex: 10,
     borderLeftWidth: 3,
     borderLeftColor: colors.primary,
+    justifyContent: 'center', // Centrado vertical del contenido
+    overflow: 'hidden', // Para evitar que el contenido se desborde
+  },
+  // Estilo especial para citas cortas (5-15 min)
+  shortAppointment: {
+    padding: 6, // Menos padding para optimizar espacio
+  },
+  // Estilo para el nombre del cliente en citas cortas
+  shortAppointmentClientName: {
+    fontSize: 14,
+    fontWeight: '700', // Más destacado en las citas cortas
+    marginBottom: 2, // Menos espacio al fondo
   },
   appointmentBlockHeader: {
     flexDirection: 'row',
@@ -1483,9 +1533,10 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   appointmentTimeRange: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#111827',
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#4B5563',
+    marginBottom: 2,
   },
   hourDivider: {
     position: 'absolute',
@@ -1493,7 +1544,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: 1, // Grosor uniforme como en Boosky
     backgroundColor: '#E9EAEE', // Color base tipo Boosky
-    zIndex: -1, // Valor negativo para asegurar que esté por debajo de todo
+    zIndex: 2, // Específicamente bajo para evitar que cubra las interacciones
     // Líneas rectas sin bordes redondeados como en Boosky
     borderRadius: 0,
     shadowColor: '#000',
@@ -1549,10 +1600,11 @@ const styles = StyleSheet.create({
   },
   appointmentClientName: {
     fontSize: 13,
-    color: '#333333',
-    fontWeight: '600',
-    marginBottom: 5,
+    color: '#111827',
+    fontWeight: '700', // Más bold para destacar
+    marginBottom: 2, // Margen reducido
     letterSpacing: 0.2,
+    paddingTop: 2, // Un pequeño padding superior
   },
   zoomControls: {
     flexDirection: 'row',
@@ -1597,13 +1649,44 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   multipleAppointmentsContainer: {
-    // kept for compatibility; multiple appointments are now absolutely positioned
-    paddingRight: 10,
+    flexDirection: 'row',
+    paddingHorizontal: 2,
+    paddingVertical: 0, // Sin padding vertical para alinear con las líneas
     alignItems: 'flex-start',
+    flexWrap: 'wrap', // Permitir que las tarjetas pasen a la siguiente fila
+    justifyContent: 'space-between', // Distribuir el espacio entre las tarjetas
+    position: 'absolute', // Posicionamiento absoluto para alinearse exactamente con las líneas
+    minHeight: 30, // Altura mínima para asegurar visibilidad
+    marginBottom: 0, // Sin margen inferior
+    borderRadius: 0, // Sin bordes redondeados
+    width: '100%', // Ancho completo
+    zIndex: 20, // Alto z-index para estar por encima de otros elementos
   },
   adjacentAppointment: {
-    marginLeft: 8,
+    marginLeft: 4,
+    marginRight: 4,
     borderLeftWidth: 3,
-    borderLeftColor: '#ffffff',
+    borderLeftColor: '#3B82F6', // Color azul similar al theme para mejor identificación
+  },
+  // Nuevos estilos para la versión compacta
+  appointmentServiceCompact: {
+    fontSize: 10,
+    color: '#6B7280',
+    fontWeight: '400',
+    marginTop: 0,
+    marginBottom: 2,
+  },
+  shortAppointmentClientName: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 0,
+  },
+  statusDotCompact: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    position: 'absolute',
+    top: 3,
+    right: 3,
   },
 });

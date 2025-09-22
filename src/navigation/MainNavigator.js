@@ -42,9 +42,9 @@ function HomeTabs() {
         tabBarActiveTintColor: '#DC2626',
         tabBarInactiveTintColor: 'gray',
         tabBarStyle: {
-          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-          paddingTop: 8,
-          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 10 : 6, // Reduced safe padding
+          paddingTop: 6,
+          height: Platform.OS === 'ios' ? 70 : 56, // Reduced overall height
           backgroundColor: '#ffffff',
           borderTopWidth: 0.5,
           borderTopColor: '#E5E7EB',
