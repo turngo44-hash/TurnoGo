@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "TurnoGo (Calendar Kit Prototype)",
+    "slug": "turnogo-calendar-proto",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "plugins": [],
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "ios": {
+      "supportsTablet": true
+    }
+  }
+}
