@@ -475,13 +475,13 @@ const calculateCurrentTimePosition = () => {
     const renderedAppointments = new Set();
     
     return (
-      // Usar solo el gesto de pellizco directamente para evitar conflictos
-      <GestureDetector gesture={pinchGesture}>
+      // Temporal: comentar gesto de pellizco para aislar problema de RecyclerListView
+      // <GestureDetector gesture={pinchGesture}>
         <ScrollView 
           ref={timelineScrollRef}
-          style={[styles.timelineContainer, { flex: 1 }]}
+          style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ flexGrow: 1, paddingBottom: 0 }}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
           // Configuración para evitar el warning de VirtualizedList
           removeClippedSubviews={false}
           nestedScrollEnabled={true}
@@ -717,7 +717,7 @@ const calculateCurrentTimePosition = () => {
           </View>
         )}
       </ScrollView>
-      </GestureDetector>
+      // </GestureDetector>
     );
   };
 
@@ -725,7 +725,7 @@ const calculateCurrentTimePosition = () => {
   // El efecto existente en líneas 135-150 ya maneja esto, así que no necesitamos uno nuevo
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']} >
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar backgroundColor="#FFFFFF" barStyle="dark-content" />
       
       {/* Header Boosky - Limpio y Simple */}
@@ -761,7 +761,7 @@ const calculateCurrentTimePosition = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Semana siempre visible */}
+      {/* Calendario siempre visible (ExpandableCalendar) */}
       <View style={styles.weekContainer}>
         <CalendarProvider
           date={selectedDate.toISOString().slice(0,10)}
@@ -770,7 +770,7 @@ const calculateCurrentTimePosition = () => {
             setSelectedDate(new Date(y, m - 1, d));
           }}
         >
-          <WeekCalendar
+          <ExpandableCalendar
             current={selectedDate.toISOString().slice(0,10)}
             onDayPress={(day) => {
               const [y, m, d] = day.dateString.split('-').map(Number);
@@ -780,6 +780,11 @@ const calculateCurrentTimePosition = () => {
             markingType={'multi-dot'}
             firstDay={1}
             hideArrows={false}
+            hideKnob={true}
+            hideHeader={false}
+            // El calendario siempre está visible, solo cambia entre compacto y expandido
+            initialPosition={isCalendarExpanded ? ExpandableCalendar.positions.OPEN : ExpandableCalendar.positions.CLOSED}
+            closeOnDayPress={false}
             theme={{
               selectedDayBackgroundColor: '#007AFF',
               selectedDayTextColor: '#FFFFFF',
@@ -792,6 +797,7 @@ const calculateCurrentTimePosition = () => {
               dayTextColor: '#1C1C1E',
               backgroundColor: '#FFFFFF',
               calendarBackground: '#FFFFFF',
+              textSectionTitleColor: '#8E8E93',
               arrowColor: '#007AFF',
               disabledArrowColor: '#D1D1D6',
               'stylesheet.day.basic': {
@@ -812,90 +818,11 @@ const calculateCurrentTimePosition = () => {
                 },
               },
             }}
-            style={styles.weekCalendarStyle}
           />
         </CalendarProvider>
       </View>
       
-      {/* Calendario expandido como overlay */}
-      {isCalendarExpanded && (
-        <Animated.View style={[styles.calendarOverlay, {
-          opacity: isCalendarExpanded ? 1 : 0,
-          transform: [{ scaleY: isCalendarExpanded ? 1 : 0.95 }]
-        }]}>
-          <CalendarProvider
-            date={selectedDate.toISOString().slice(0,10)}
-            onDateChanged={(dateString) => {
-              const [y, m, d] = dateString.split('-').map(Number);
-              setSelectedDate(new Date(y, m - 1, d));
-            }}
-          >
-            <ExpandableCalendar
-              current={selectedDate.toISOString().slice(0,10)}
-              onDayPress={(day) => {
-                const [y, m, d] = day.dateString.split('-').map(Number);
-                setSelectedDate(new Date(y, m - 1, d));
-              }}
-              markedDates={markedDates}
-              markingType={'multi-dot'}
-              firstDay={1}
-              hideArrows={true}
-              hideKnob={true}
-              hideHeader={true}
-              initialPosition={ExpandableCalendar.positions.OPEN}
-              theme={{
-                selectedDayBackgroundColor: '#007AFF',
-                selectedDayTextColor: '#FFFFFF',
-                todayTextColor: '#007AFF',
-                dotColor: '#FF3B30',
-                textDayFontWeight: '400',
-                textDayHeaderFontWeight: '600',
-                textDayHeaderFontSize: 13,
-                textDayFontSize: 16,
-                dayTextColor: '#1C1C1E',
-                backgroundColor: '#FFFFFF',
-                calendarBackground: '#FFFFFF',
-                textSectionTitleColor: '#8E8E93',
-                'stylesheet.calendar.header': {
-                  header: {
-                    height: 0,
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                    marginTop: 0,
-                    marginBottom: 0,
-                  },
-                  monthText: {
-                    height: 0,
-                    fontSize: 0,
-                    color: 'transparent',
-                  },
-                  arrow: {
-                    width: 0,
-                    height: 0,
-                  },
-                },
-                'stylesheet.day.basic': {
-                  base: {
-                    width: 32,
-                    height: 32,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  },
-                  selected: {
-                    backgroundColor: '#007AFF',
-                    borderRadius: 16,
-                  },
-                  today: {
-                    borderColor: '#007AFF',
-                    borderWidth: 1,
-                    borderRadius: 16,
-                  },
-                },
-              }}
-            />
-          </CalendarProvider>
-        </Animated.View>
-      )}      {/* Timeline */}
+      {/* Timeline */}
       <View style={styles.timelineContainer}>
         {renderAppointmentsForSelectedDate()}
       </View>
@@ -907,6 +834,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+    height: '100%',
   },
   fixedHeader: {
     backgroundColor: '#FFFFFF',
@@ -1186,6 +1114,7 @@ const styles = StyleSheet.create({
   timelineContent: {
     flexDirection: 'row',
     flex: 1,
+    minHeight: 600,
   },
   timeLabelsColumn: {
     width: 48, // Reducido como solicitado
@@ -1452,9 +1381,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 0.33,
     borderBottomColor: '#C6C6C8',
+    minHeight: 80,
   },
   weekCalendarStyle: {
     paddingHorizontal: 16,
+    height: 60,
+    minHeight: 60,
   },
   calendarOverlay: {
     position: 'absolute',
@@ -1475,5 +1407,6 @@ const styles = StyleSheet.create({
   timelineContainer: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+    minHeight: 200,
   },
 });
