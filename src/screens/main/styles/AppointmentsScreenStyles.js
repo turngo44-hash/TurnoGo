@@ -74,6 +74,30 @@ const styles = StyleSheet.create({
     marginBottom: 0, // Quitamos el margen inferior
     // Eliminamos la línea horizontal
   },
+  compactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexWrap: 'nowrap',
+  },
+  compactDate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+  },
+  compactDateText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    textTransform: 'capitalize'
+  },
+  moreButton: {
+    padding: 6,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
   calendarHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -110,130 +134,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     fontSize: 14,
   },
-  daysScrollView: {
-    paddingLeft: 8,
-    paddingRight: 8,
-    paddingBottom: 12,
-    paddingTop: 8,
-    minHeight: 80,
-    alignItems: 'center',
-  },
-  dayItem: {
-    width: width / 7 - 8,
-    height: 60,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 4,
-    marginBottom: 5,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  selectedDayItem: {
-    backgroundColor: colors.primary,
-    height: 60,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  otherMonthDayItem: {
-    opacity: 0.4,
-  },
-  todayDayItem: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  dayOfWeekText: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  dayNumberText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  selectedDayText: {
-    color: '#FFFFFF',
-  },
-  otherMonthDayText: {
-    color: '#9CA3AF',
-  },
-  hasAppointmentsDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
-    marginTop: 4,
-  },
-  selectedDotColor: {
-    backgroundColor: '#FFFFFF',
-  },
-  weekDaysHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  weekDayText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#6B7280',
-    width: width / 7,
-    textAlign: 'center',
-  },
-  monthCalendarContainer: {
-    flex: 1,
-    paddingHorizontal: 8,
-  },
-  weekRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 8,
-  },
-  calendarDay: {
-    width: width / 7 - 10,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 18,
-  },
-  otherMonthDay: {
-    opacity: 0.4,
-  },
-  selectedDay: {
-    backgroundColor: colors.primary,
-  },
-  today: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  calendarDayText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#111827',
-  },
-  todayText: {
-    color: colors.primary,
-    fontWeight: 'bold',
-  },
-  appointmentIndicator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
-    marginTop: 2,
-  },
-  selectedAppointmentIndicator: {
-    backgroundColor: '#FFFFFF',
-  },
+  // Header/navigation styles removed where not used; WeekCalendar handles week display.
   appointmentsContainer: {
     flex: 1,
     paddingTop: 0, // Eliminamos el padding superior

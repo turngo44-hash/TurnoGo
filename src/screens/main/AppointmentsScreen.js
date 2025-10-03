@@ -4,13 +4,11 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   ScrollView,
   Animated,
   Dimensions,
   StatusBar,
   Image,
-  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -18,10 +16,30 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import colors from '../../constants/colors';
+import { LocaleConfig, Calendar, CalendarProvider, WeekCalendar } from 'react-native-calendars';
+import { WMCalendar } from '@quidone/react-native-calendars';
 import AppointmentTimelineCard from './components/AppointmentTimelineCard';
+
+export default function AppointmentsScreen() {
+// Component state, refs and constants
+const navigation = useNavigation();
+const [selectedDate, setSelectedDate] = useState(new Date());
+const [appointments, setAppointments] = useState([]);
+const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
+const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
+const [viewMode, setViewMode] = useState('day');
+const calendarAnimation = useRef(new Animated.Value(0)).current;
+const dragStartY = useRef(null);
+const timelineScrollRef = useRef(null);
+const pinchGesture = Gesture.Pinch();
+const headerHeightRef = useRef(60);
+const [headerHeight, setHeaderHeight] = useState(60);
+const [weekHeight, setWeekHeight] = useState(90);
+const EXPANDED_CALENDAR_HEIGHT = 320;
 
 // Helper to check if two dates are the same day
 const isSameDay = (date1, date2) => {
+  if (!date1 || !date2) return false;
   return (
     date1.getDate() === date2.getDate() &&
     date1.getMonth() === date2.getMonth() &&
@@ -29,103 +47,21 @@ const isSameDay = (date1, date2) => {
   );
 };
 
-const { width } = Dimensions.get('window');
-
-const daysOfWeek = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const monthsOfYear = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-];
-
-export default function AppointmentsScreen() {
-  const navigation = useNavigation();
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [calendarDays, setCalendarDays] = useState([]);
-  const [appointments, setAppointments] = useState([]);
-  const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
-  const [viewMode, setViewMode] = useState('day'); // day, week, month
-  const [zoomScale, setZoomScale] = useState(1); // Factor de escala para el zoom (1 = normal)
+// Utility placeholders used by timeline rendering
+const getSlotHeight = () => 30; // px per 15-min slot (approx)
+const calculateCurrentTimePosition = () => {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  if (hours < 9 || hours >= 18) return 0;
+  const hoursFromStart = hours - 9;
+  const minutesAsDecimal = minutes / 60;
+  const totalHoursFromStart = hoursFromStart + minutesAsDecimal;
+  const slotsPerHour = 4; // 15-min slots
+  return totalHoursFromStart * slotsPerHour * getSlotHeight();
+};
   
-  const calendarAnimation = useRef(new Animated.Value(0)).current;
-  const scrollViewRef = useRef(null);
-  const timelineScrollRef = useRef(null);
-  const initialScale = useRef(1);
-  const lastZoomChangeTime = useRef(0);
-  const ZOOM_DEBOUNCE_TIME = 400; // Tiempo más largo entre cambios para evitar activaciones múltiples
-  
-  // Implementación mejorada del gesto de zoom con límites más estrictos
-  const pinchGesture = Gesture.Pinch()
-    .onBegin(() => {
-      initialScale.current = zoomScale;
-    })
-    .onChange((e) => {
-      // Verificar si ha pasado suficiente tiempo desde el último cambio de zoom
-      const now = Date.now();
-      if (now - lastZoomChangeTime.current < ZOOM_DEBOUNCE_TIME) {
-        return;
-      }
-      
-      // Límites de zoom ajustados según la solicitud
-      const MIN_ZOOM = 0.75;  // Mínimo un poco más grande como solicitado
-      const MAX_ZOOM = 1.1;   // Máximo más pequeño como solicitado
-      
-      // Aplicamos zoom continuo con límites controlados
-      const calculatedScale = e.scale * initialScale.current;
-      const newScale = Math.min(Math.max(calculatedScale, MIN_ZOOM), MAX_ZOOM);
-      
-      // Aplicamos cambios solo si el nuevo valor está dentro del rango aceptable
-      if (newScale >= MIN_ZOOM && newScale <= MAX_ZOOM) {
-        setZoomScale(newScale);
-        lastZoomChangeTime.current = now;
-      }
-    });
-
-  // Función global para calcular la altura de cada slot de 15 minutos
-  const getSlotHeight = () => {
-    // Altura base para cada intervalo de 15 minutos
-    const baseHeight = 30;
-    
-    // Aplicamos una función de ajuste más suave para evitar que las líneas pierdan integridad
-    // Usamos una función que suaviza el zoom para prevenir superposiciones
-    let adjustedHeight = baseHeight * zoomScale;
-    
-    // Aseguramos que la altura tiene un valor mínimo para mantener legibilidad
-    const MIN_SLOT_HEIGHT = 20; 
-    // Y un máximo para evitar que las líneas se separen demasiado
-    const MAX_SLOT_HEIGHT = 50;
-    
-    return Math.min(Math.max(adjustedHeight, MIN_SLOT_HEIGHT), MAX_SLOT_HEIGHT);
-  };
-  
-  // Calculate position for the current time indicator
-  const calculateCurrentTimePosition = () => {
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
-    
-    // If current time is outside working hours, return 0
-    if (hours < 9 || hours >= 18) {
-      return 0;
-    }
-    
-    // Calculate position based on slot height
-    const hoursFromStart = hours - 9; // Working hours start at 9:00
-    const minutesAsDecimal = minutes / 60;
-    const totalHoursFromStart = hoursFromStart + minutesAsDecimal;
-    
-    // Usar siempre slots de 15 minutos
-    const slotsPerHour = 4;  // 15min intervals
-    
-    return totalHoursFromStart * slotsPerHour * getSlotHeight();
-  };
-  
-  // Generate calendar days for the current month
-  useEffect(() => {
-    generateCalendarDays();
-  }, [selectedMonth, selectedYear]);
+  // month/year derived from selectedDate when rendering header
   
   // Fetch appointments for the selected date
   useEffect(() => {
@@ -154,19 +90,7 @@ export default function AppointmentsScreen() {
     }
   }, [selectedDate, viewMode]);
   
-  // Animation for calendar expand/collapse
-  useEffect(() => {
-    Animated.timing(calendarAnimation, {
-      toValue: isCalendarExpanded ? 1 : 0,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  }, [isCalendarExpanded]);
-  
-  const calendarHeight = calendarAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [150, 360],
-  });
+  // expand/collapse animation removed
   
   // Load sample appointments
   const loadSampleAppointments = async () => {
@@ -269,99 +193,19 @@ export default function AppointmentsScreen() {
     return filteredAppointments;
   };
   
-  // Generate days for the calendar
-  const generateCalendarDays = () => {
-    const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-    const firstDayOfMonth = new Date(selectedYear, selectedMonth, 1).getDay();
-    
-    const days = [];
-    
-    // Add days from previous month to fill the first week
-    const prevMonth = selectedMonth === 0 ? 11 : selectedMonth - 1;
-    const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
-    const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
-    
-    for (let i = 0; i < firstDayOfMonth; i++) {
-      const day = daysInPrevMonth - firstDayOfMonth + i + 1;
-      days.push({
-        day,
-        month: prevMonth,
-        year: prevYear,
-        isCurrentMonth: false,
-        date: new Date(prevYear, prevMonth, day),
-      });
-    }
-    
-    // Add days for the current month
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(selectedYear, selectedMonth, day);
-      days.push({
-        day,
-        month: selectedMonth,
-        year: selectedYear,
-        isCurrentMonth: true,
-        date,
-        isToday: date.toDateString() === new Date().toDateString(),
-        hasAppointments: appointments.some(appointment => {
-          const appointmentDate = new Date(appointment.date);
-          return appointmentDate.toDateString() === date.toDateString();
-        }),
-      });
-    }
-    
-    // Add days from next month to complete the last week
-    const nextMonth = selectedMonth === 11 ? 0 : selectedMonth + 1;
-    const nextYear = selectedMonth === 11 ? selectedYear + 1 : selectedYear;
-    const daysToAdd = 42 - days.length; // 6 weeks * 7 days = 42
-    
-    for (let day = 1; day <= daysToAdd; day++) {
-      days.push({
-        day,
-        month: nextMonth,
-        year: nextYear,
-        isCurrentMonth: false,
-        date: new Date(nextYear, nextMonth, day),
-      });
-    }
-    
-    setCalendarDays(days);
-    
-    // Scroll to selected date in horizontal calendar
-    if (scrollViewRef.current && viewMode === 'day') {
-      const today = new Date();
-      const currentDayIndex = days.findIndex(day => 
-        day.isCurrentMonth && day.day === today.getDate()
-      );
-      
-      if (currentDayIndex !== -1) {
-        setTimeout(() => {
-          scrollViewRef.current.scrollTo({
-            x: (currentDayIndex - 2) * (width / 7),
-            animated: true,
-          });
-        }, 100);
-      }
-    }
-  };
+  // calendarDays generation removed; WeekCalendar handles week view.
   
-  // Navigate to previous month
+  // Navigate to previous/next month by adjusting selectedDate
   const goToPrevMonth = () => {
-    if (selectedMonth === 0) {
-      setSelectedMonth(11);
-      setSelectedYear(selectedYear - 1);
-    } else {
-      setSelectedMonth(selectedMonth - 1);
-    }
+    const d = new Date(selectedDate);
+    d.setMonth(d.getMonth() - 1);
+    setSelectedDate(d);
   };
-  
-  // Navigate to next month
+
   const goToNextMonth = () => {
-    if (selectedMonth === 11) {
-      setSelectedMonth(0);
-      setSelectedYear(selectedYear + 1);
-    } else {
-      setSelectedMonth(selectedMonth + 1);
-    }
+    const d = new Date(selectedDate);
+    d.setMonth(d.getMonth() + 1);
+    setSelectedDate(d);
   };
   
   // Select a date
@@ -372,10 +216,39 @@ export default function AppointmentsScreen() {
     }
   };
   
-  // Toggle calendar view
+  // Toggle calendar expand/collapse
   const toggleCalendarView = () => {
-    setIsCalendarExpanded(!isCalendarExpanded);
+    setIsCalendarExpanded(prev => !prev);
+    Animated.timing(calendarAnimation, {
+      toValue: isCalendarExpanded ? 0 : 1,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
   };
+
+  const collapsedHeight = headerHeight + weekHeight || 120;
+  const expandedHeight = headerHeight + EXPANDED_CALENDAR_HEIGHT;
+
+  const calendarHeight = calendarAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [collapsedHeight, expandedHeight],
+  });
+
+  // Gesture to drag down/up to expand/collapse
+  const pan = Gesture.Pan()
+    .onStart(() => {
+      dragStartY.current = null;
+    })
+    .onUpdate((e) => {
+      if (dragStartY.current === null) dragStartY.current = e.translationY;
+      const dy = e.translationY - dragStartY.current;
+      // if dragging down enough, expand; up enough, collapse
+      if (dy > 60 && !isCalendarExpanded) {
+        toggleCalendarView();
+      } else if (dy < -60 && isCalendarExpanded) {
+        toggleCalendarView();
+      }
+    });
   
   // Format time (24h to 12h)
   const formatTime = (time) => {
@@ -425,101 +298,11 @@ export default function AppointmentsScreen() {
     });
   };
   
-  // Day view component for horizontal scrolling calendar
-  const renderDayItem = ({ item, index }) => {
-    const isSelected = selectedDate.toDateString() === item.date.toDateString();
-    const today = new Date();
-    const isToday = item.date.toDateString() === today.toDateString();
-    
-    return (
-      <TouchableOpacity
-        style={[
-          styles.dayItem,
-          isSelected && styles.selectedDayItem,
-          !item.isCurrentMonth && styles.otherMonthDayItem,
-          isToday && !isSelected && styles.todayDayItem,
-        ]}
-        onPress={() => selectDate(item.date)}
-      >
-        <Text style={[
-          styles.dayOfWeekText,
-          isSelected && styles.selectedDayText,
-          !item.isCurrentMonth && styles.otherMonthDayText,
-        ]}>
-          {daysOfWeek[item.date.getDay()]}
-        </Text>
-        <Text style={[
-          styles.dayNumberText,
-          isSelected && styles.selectedDayText,
-          !item.isCurrentMonth && styles.otherMonthDayText,
-        ]}>
-          {item.day}
-        </Text>
-        {item.hasAppointments && (
-          <View style={[styles.hasAppointmentsDot, isSelected && styles.selectedDotColor]} />
-        )}
-      </TouchableOpacity>
-    );
-  };
+  // Old horizontal day renderer removed; WeekCalendar provides day rendering.
   
-  // Render calendar week header
-  const renderWeekDaysHeader = () => (
-    <View style={styles.weekDaysHeader}>
-      {daysOfWeek.map((day, index) => (
-        <Text key={index} style={styles.weekDayText}>{day}</Text>
-      ))}
-    </View>
-  );
+  // Old week header removed; WeekCalendar handles headers and LocaleConfig sets language.
   
-  // Render month view calendar
-  const renderMonthCalendar = () => {
-    const chunks = [];
-    for (let i = 0; i < calendarDays.length; i += 7) {
-      chunks.push(calendarDays.slice(i, i + 7));
-    }
-    
-    return (
-      <View style={styles.monthCalendarContainer}>
-        {renderWeekDaysHeader()}
-        {chunks.map((week, weekIndex) => (
-          <View key={`week-${weekIndex}`} style={styles.weekRow}>
-            {week.map((day, dayIndex) => {
-              const isSelected = selectedDate.toDateString() === day.date.toDateString();
-              const isToday = day.isToday;
-              
-              return (
-                <TouchableOpacity
-                  key={`day-${weekIndex}-${dayIndex}`}
-                  style={[
-                    styles.calendarDay,
-                    !day.isCurrentMonth && styles.otherMonthDay,
-                    isSelected && styles.selectedDay,
-                    isToday && styles.today,
-                  ]}
-                  onPress={() => selectDate(day.date)}
-                >
-                  <Text style={[
-                    styles.calendarDayText,
-                    !day.isCurrentMonth && styles.otherMonthDayText,
-                    isSelected && styles.selectedDayText,
-                    isToday && !isSelected && styles.todayText,
-                  ]}>
-                    {day.day}
-                  </Text>
-                  {day.hasAppointments && (
-                    <View style={[
-                      styles.appointmentIndicator,
-                      isSelected && styles.selectedAppointmentIndicator,
-                    ]} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
-      </View>
-    );
-  };
+  // Month view removed: we always use WeekCalendar; month-grid logic deleted.
   
   // Render a time slot
   const renderTimeSlot = (time, isOccupied = false, appointment = null) => {
@@ -832,7 +615,7 @@ export default function AppointmentsScreen() {
                 
                 // Contenedor horizontal para múltiples citas
                 return (
-                  <> 
+                  <React.Fragment key={`slot-block-${index}`}>
                     {appointmentsToRender.map((appointment, aptIndex) => {
                       // Calcular slots que ocupa esta cita
                       const slotsCount = getAppointmentDurationInSlots(appointment);
@@ -864,7 +647,7 @@ export default function AppointmentsScreen() {
                         </TouchableOpacity>
                       );
                     })}
-                  </>
+                  </React.Fragment>
                 );
               }
               
@@ -916,45 +699,113 @@ export default function AppointmentsScreen() {
       
       {/* Cabecera fija que incluye el calendario */}
       <View style={styles.fixedHeader}>
-        <Animated.View style={[styles.calendarContainer, { height: calendarHeight, minHeight: 140 }]}>
-          <View style={styles.calendarHeader}>
-            <TouchableOpacity onPress={toggleCalendarView} style={styles.monthYearContainer}>
-              <Text style={styles.monthYearText}>
-                {monthsOfYear[selectedMonth]} {selectedYear}
-              </Text>
-              <Ionicons 
-                name={isCalendarExpanded ? "chevron-up" : "chevron-down"} 
-                size={20} 
-                color={colors.text} 
-              />
+        <Animated.View style={[styles.calendarContainer, { height: calendarHeight }]}> 
+          {/* Compact header */}
+          <View style={styles.compactHeader} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
+            <TouchableOpacity style={styles.compactDate} onPress={toggleCalendarView}>
+              <Text style={styles.compactDateText}>{new Date(selectedDate).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short'})}</Text>
+              <Ionicons name={isCalendarExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text} style={{ marginLeft: 8 }} />
             </TouchableOpacity>
-            
-            <View style={styles.navigationButtons}>
-              <TouchableOpacity onPress={goToPrevMonth} style={styles.navButton}>
-                <Ionicons name="chevron-back" size={22} color={colors.text} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={goToNextMonth} style={styles.navButton}>
-                <Ionicons name="chevron-forward" size={22} color={colors.text} />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.moreButton} onPress={() => {
+              // try to navigate to settings if exists
+              try { navigation.navigate('Settings'); } catch (e) { console.warn('Settings screen not found'); }
+            }}>
+              <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
+            </TouchableOpacity>
           </View>
-          
-          {isCalendarExpanded ? (
-            renderMonthCalendar()
-          ) : (
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={styles.daysScrollView}
-              ref={scrollViewRef}
-              style={{minHeight: 80}}
-            >
-              {calendarDays.filter(day => day.isCurrentMonth).map((day, index) => (
-                <View key={`day-${index}`}>
-                  {renderDayItem({ item: day, index })}
-                </View>
-              ))}
-            </ScrollView>
+
+          <GestureDetector gesture={pan}>
+          <CalendarProvider
+            date={selectedDate.toISOString().slice(0,10)}
+            onDateChanged={(dateString) => {
+              const [y, m, d] = dateString.split('-').map(Number);
+              setSelectedDate(new Date(y, m - 1, d));
+            }}
+          >
+            <View onLayout={(e) => setWeekHeight(e.nativeEvent.layout.height)}>
+            <WeekCalendar
+              current={selectedDate.toISOString().slice(0,10)}
+              hideArrows={true}
+              onDayPress={(day) => {
+                const [y, m, d] = day.dateString.split('-').map(Number);
+                setSelectedDate(new Date(y, m - 1, d));
+              }}
+              markedDates={(() => {
+                const markers = {};
+                appointments.forEach((a) => {
+                  try {
+                    const dt = new Date(a.date);
+                    const key = dt.toISOString().slice(0,10);
+                    if (!markers[key]) markers[key] = { dots: [] };
+                    const color = a.status === 'confirmed' ? '#10B981' : (a.status === 'pending' ? '#FBBF24' : '#EF4444');
+                    markers[key].dots.push({ color });
+                  } catch (e) {}
+                });
+                const selKey = selectedDate.toISOString().slice(0,10);
+                if (!markers[selKey]) markers[selKey] = {};
+                markers[selKey].selected = true;
+                markers[selKey].selectedColor = colors.primary;
+                return markers;
+              })()}
+              markingType={'multi-dot'}
+              firstDay={1}
+              theme={{
+                selectedDayBackgroundColor: colors.primary,
+                todayTextColor: colors.primary,
+                dotColor: colors.primary,
+                arrowColor: colors.primary,
+                textDayFontWeight: '600',
+                textMonthFontWeight: '600',
+              }}
+            />
+            </View>
+          </CalendarProvider>
+          </GestureDetector>
+          {/* Month calendar (expanded) rendered below WeekCalendar when expanded */}
+          {isCalendarExpanded && (
+            <Calendar
+              current={selectedDate.toISOString().slice(0,10)}
+              onDayPress={(day) => {
+                const [y, m, d] = day.dateString.split('-').map(Number);
+                setSelectedDate(new Date(y, m - 1, d));
+                // collapse after selecting
+                toggleCalendarView();
+              }}
+              markingType={'multi-dot'}
+              markedDates={(() => {
+                const markers = {};
+                appointments.forEach((a) => {
+                  try {
+                    const dt = new Date(a.date);
+                    const key = dt.toISOString().slice(0,10);
+                    if (!markers[key]) markers[key] = { dots: [] };
+                    const color = a.status === 'confirmed' ? '#10B981' : (a.status === 'pending' ? '#FBBF24' : '#EF4444');
+                    markers[key].dots.push({ color });
+                  } catch (e) {}
+                });
+                return markers;
+              })()}
+              firstDay={1}
+              // Hide the default month header ("< Octubre 2025 >") and keep weekday names
+              renderHeader={() => null}
+              // Hide arrows (< >) on the month calendar
+              hideArrows={true}
+              // Allow horizontal swipe to change month
+              enableSwipeMonths={true}
+              onMonthChange={(month) => {
+                // month = { year, month }
+                try {
+                  const newDay = Math.min(new Date(month.year, month.month - 1, selectedDate.getDate()).getDate(), 28);
+                  setSelectedDate(new Date(month.year, month.month - 1, Math.min(selectedDate.getDate(), newDay)));
+                } catch (e) {
+                  setSelectedDate(new Date(month.year, month.month - 1, 1));
+                }
+              }}
+              theme={{
+                selectedDayBackgroundColor: colors.primary,
+                todayTextColor: colors.primary,
+              }}
+            />
           )}
         </Animated.View>
       </View>
@@ -1074,130 +925,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  daysScrollView: {
-    paddingLeft: 8,
-    paddingRight: 8,
-    paddingBottom: 5,  // Reducido el padding inferior
-    paddingTop: 8,
-    minHeight: 70,     // Reducida la altura mínima
-    alignItems: 'center',
-  },
-  dayItem: {
-    width: width / 7 - 8,
-    height: 55,  // Reducida la altura
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 4,
-    marginBottom: 2,  // Reducido el margen inferior
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  selectedDayItem: {
-    backgroundColor: colors.primary,
-    height: 60,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  otherMonthDayItem: {
-    opacity: 0.4,
-  },
-  todayDayItem: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  dayOfWeekText: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  dayNumberText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  selectedDayText: {
-    color: '#FFFFFF',
-  },
-  otherMonthDayText: {
-    color: '#9CA3AF',
-  },
-  hasAppointmentsDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
-    marginTop: 4,
-  },
-  selectedDotColor: {
-    backgroundColor: '#FFFFFF',
-  },
-  weekDaysHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  weekDayText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#6B7280',
-    width: width / 7,
-    textAlign: 'center',
-  },
-  monthCalendarContainer: {
-    flex: 1,
-    paddingHorizontal: 8,
-  },
-  weekRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 8,
-  },
-  calendarDay: {
-    width: width / 7 - 10,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 18,
-  },
-  otherMonthDay: {
-    opacity: 0.4,
-  },
-  selectedDay: {
-    backgroundColor: colors.primary,
-  },
-  today: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  calendarDayText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#111827',
-  },
-  todayText: {
-    color: colors.primary,
-    fontWeight: 'bold',
-  },
-  appointmentIndicator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
-    marginTop: 2,
-  },
-  selectedAppointmentIndicator: {
-    backgroundColor: '#FFFFFF',
-  },
+  // Removed old horizontal/month calendar styles that are no longer used.
   appointmentsContainer: {
     flex: 1,
     paddingTop: 0,  // Eliminado el padding superior
